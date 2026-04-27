@@ -816,6 +816,44 @@ pub async fn get_events_by_tx(
 
 #[utoipa::path(
     get,
+    path = "/v1/events/ledger/{ledger}",
+    tag = "events",
+    params(
+        ("ledger" = i64, Path, description = "Ledger sequence number (positive integer)"),
+    ),
+    responses(
+        (status = 200, description = "All events for the specified ledger (empty array if none)"),
+        (status = 400, description = "Invalid ledger value"),
+    )
+)]
+pub async fn get_events_by_ledger(
+    State(state): State<AppState>,
+    Path(ledger): Path<i64>,
+) -> Result<Json<Value>, AppError> {
+    if ledger <= 0 {
+        return Err(AppError::Validation(
+            "ledger must be a positive integer".to_string(),
+        ));
+    }
+
+    let rows = sqlx::query_as::<_, models::Event>(
+        "SELECT id, contract_id, event_type, tx_hash, ledger, timestamp, event_data, created_at, \
+         0::bigint AS total_count FROM events WHERE ledger = $1 ORDER BY id ASC",
+    )
+    .bind(ledger)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let events: Vec<Value> = rows
+        .iter()
+        .map(|e| filter_fields(e, models::PaginationParams::ALLOWED_FIELDS))
+        .collect();
+
+    Ok(Json(json!({ "data": events, "ledger": ledger })))
+}
+
+#[utoipa::path(
+    get,
     path = "/v1/contracts",
     tag = "events",
     params(
