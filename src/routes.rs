@@ -61,6 +61,7 @@ pub struct AppState {
         handlers::get_events,
         handlers::get_events_by_contract,
         handlers::get_events_by_tx,
+        handlers::get_events_by_ledger,
         handlers::stream_events,
         handlers::stream_events_by_contract,
         handlers::get_contracts,
@@ -132,6 +133,7 @@ pub fn create_router_with_tx(
         .route("/events/contract/:contract_id", get(handlers::get_events_by_contract))
         .route("/events/contract/:contract_id/stream", get(handlers::stream_events_by_contract))
         .route("/events/tx/:tx_hash", get(handlers::get_events_by_tx))
+        .route("/events/ledger/:ledger", get(handlers::get_events_by_ledger))
         .route("/contracts", get(handlers::get_contracts));
 
     // Unversioned deprecated aliases (same handlers, add Deprecation header via middleware)
@@ -141,6 +143,7 @@ pub fn create_router_with_tx(
         .route("/events/contract/:contract_id", get(handlers::get_events_by_contract))
         .route("/events/contract/:contract_id/stream", get(handlers::stream_events_by_contract))
         .route("/events/tx/:tx_hash", get(handlers::get_events_by_tx))
+        .route("/events/ledger/:ledger", get(handlers::get_events_by_ledger))
         .route("/contracts", get(handlers::get_contracts))
         .layer(axum::middleware::from_fn(|req: Request<Body>, next: axum::middleware::Next| async move {
             let path = req.uri().path().to_string();

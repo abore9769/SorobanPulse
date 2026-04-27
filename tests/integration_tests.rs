@@ -299,3 +299,125 @@ async fn sse_deprecated_contract_stream_unversioned_alias_works(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(resp.headers().get("Deprecation").unwrap(), "true");
 }
+
+// --- Issue #187: GET /v1/events/ledger/:ledger ---
+
+async fn insert_events_for_ledger(pool: &PgPool, ledger: i64, count: usize) {
+    for i in 0..count {
+        sqlx::query(
+            "INSERT INTO events (contract_id, event_type, tx_hash, ledger, timestamp, event_data)
+             VALUES ($1, $2, $3, $4, NOW(), $5)",
+        )
+        .bind(format!("C{:0>55}", i))
+        .bind("contract")
+        .bind(format!("{:0>62}{:02}", i, ledger))
+        .bind(ledger)
+        .bind(serde_json::json!({}))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn get_events_by_ledger_returns_all_events_for_ledger(pool: PgPool) {
+    insert_events_for_ledger(&pool, 500, 3).await;
+    insert_events_for_ledger(&pool, 501, 2).await;
+
+    let app = make_router(pool, None);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/events/ledger/500")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["ledger"], 500);
+    assert_eq!(body["data"].as_array().unwrap().len(), 3);
+    for event in body["data"].as_array().unwrap() {
+        assert_eq!(event["ledger"], 500);
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn get_events_by_ledger_empty_returns_200_with_empty_data(pool: PgPool) {
+    let app = make_router(pool, None);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/events/ledger/9999")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+    assert_eq!(body["ledger"], 9999);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn get_events_by_ledger_invalid_returns_400(pool: PgPool) {
+    let app = make_router(pool, None);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/events/ledger/abc")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn get_events_by_ledger_zero_returns_400(pool: PgPool) {
+    let app = make_router(pool, None);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/events/ledger/0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert!(body["error"].as_str().unwrap().contains("positive integer"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn get_events_by_ledger_deprecated_alias_works(pool: PgPool) {
+    insert_events_for_ledger(&pool, 100, 1).await;
+
+    let app = make_router(pool, None);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/events/ledger/100")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers().get("Deprecation").unwrap(), "true");
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+}
